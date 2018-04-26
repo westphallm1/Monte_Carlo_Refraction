@@ -22,181 +22,11 @@ from numpy import arange, sin, pi
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.patches import Polygon, Rectangle
+from artists import Layer, buildLayers, Particle
 
 progname = os.path.basename(sys.argv[0])
 progversion = "0.1"
 
-class Particle(object):
-    def __init__(self,master,id_,x=0,y=0,theta=0,v=0,polarization = 1):
-        self._id = id_
-        self.master = master
-        self.x = x
-        self.y = y
-        self.theta = theta
-        self.v = v
-        self.vx = np.cos(theta)*v
-        self.vy = np.sin(theta)*v
-        self.bounces = 0
-        self.polarization = polarization
-
-        self._artist, = self.master.axes.plot(self.x,self.y,'ro')
-        self._gone = False
-
-    def update(self):
-        if not self._gone:
-            self.move()
-            self.delete_if_gone()
-    
-
-    def moveToNewLayer(self,layer,up=True):
-        if up:
-            new_sin = layer.nprev*(np.sin(np.pi/2-self.theta))/layer.n
-        else:
-            new_sin = layer.nnext*(np.sin(np.pi/2-self.theta))/layer.n
-        if (-1 < new_sin) and (new_sin < 1):
-            #move right to the boundry so we don't double count it
-            if up:
-                pct_move = (layer.y0-self.y)/self.vy
-                assert pct_move > 0 and pct_move < 1
-            else:
-                pct_move = (layer.yf-self.y)/self.vy
-                assert pct_move > 0 and pct_move < 1
-            self.y += self.vy*pct_move
-            self.x += self.vx*pct_move
-            self.theta = np.pi/2-np.arcsin(new_sin)
-            if up:
-                self.v = self.v * layer.nprev/layer.n
-            else:
-                self.v = self.v * layer.nnext/layer.n
-                self.theta *=-1
-            self.vx = np.cos(self.theta)*self.v
-            self.vy = np.sin(self.theta)*self.v
-        else:
-            self._delete_self()
-
-
-    def getThetaIThetaF(self,layer,up=True):
-        theta_i = np.pi/2 - self.theta
-        if up:
-            new_sin = layer.nprev*(np.sin(theta_i))/layer.n
-            m = layer.n/layer.nprev
-        else:
-            new_sin = layer.nnext*(np.sin(theta_i))/layer.n
-            m = layer.n/layer.nnext
-        theta_f = np.arcsin(new_sin)
-
-        return theta_i, theta_f, m
-
-    def parallelPolarizedReflectivity(self,layer,up=True):
-        theta_i, theta_f, m = self.getThetaIThetaF(layer,up)
-        cos_ti = np.cos(theta_i)
-        cos_tf = np.cos(theta_f)
-        if not up:
-            cos_ti = np.abs(cos_ti)
-        rp = ((cos_tf-m*cos_ti)/(cos_ti+m*cos_tf))**2
-        return rp
-
-
-    def perpendicularPolarizedReflectivity(self,layer,up=True):
-        theta_i, theta_f, m = self.getThetaIThetaF(layer,up)
-        cos_ti = np.cos(theta_i)
-        cos_tf = np.cos(theta_f)
-        if not up:
-            cos_ti = np.abs(cos_ti)
-        rs = ((cos_ti-m*cos_tf)/(cos_tf+m*cos_ti))**2
-        return rs
-
-    def monteCarloRefract(self,layer,up=True):
-        #TODO
-        if self.polarization == 1:
-            r = self.parallelPolarizedReflectivity(layer,up)
-        else:
-            r = self.perpendicularPolarizedReflectivity(layer,up)
-        if np.random.rand() < r:
-            self.bounces+=1
-            if up:
-                pct_move = (layer.y0-self.y)/self.vy
-            else:
-                pct_move = -(self.y-layer.yf)/self.vy
-            self.y += self.vy*pct_move
-            self.x += self.vx*pct_move
-            self.theta = -self.theta
-            self.vx = np.cos(self.theta)*self.v
-            self.vy = np.sin(self.theta)*self.v
-            return True
-
-    def checkForChangeLayers(self):
-        for layer in self.master.layers:
-            if self.enteringFromAbove(layer):
-                if self.monteCarloRefract(layer):
-                   pass 
-                else:
-                    self.moveToNewLayer(layer)
-                break
-            elif self.enteringFromBelow(layer):
-                if self.monteCarloRefract(layer,up=False):
-                   pass 
-                else:
-                    self.moveToNewLayer(layer,up=False)
-                break
-
-
-    def enteringFromAbove(self,layer):
-        return (self.vy < 0)and(self.y > layer.y0)and(self.y+self.vy < layer.y0)
-
-    def enteringFromBelow(self,layer):
-        return (self.vy > 0)and(self.y < layer.yf)and(self.y+self.vy > layer.yf)
-
-    def move(self):
-        self.checkForChangeLayers()
-        self.x+=self.vx
-        self.y+=self.vy
-        self._artist.set_xdata(self.x)
-        self._artist.set_ydata(self.y)
-
-    def _delete_self(self):
-        if not self._gone:
-            self._gone = True
-            self._artist.remove()
-            self.master.remove_particle(self._id)
-
-    def delete_if_gone(self):
-        if(self.x > self.master.axes.get_xlim()[1] or 
-           self.x < self.master.axes.get_xlim()[0] or 
-           self.y > self.master.axes.get_ylim()[1] or
-           self.y < self.master.axes.get_ylim()[0]   ):
-            self._delete_self()
-
-
-class Layer(object):
-    def __init__(self,n,y0,yf,nprev = 1,nnext = 1):
-        self.n = n
-        self.nprev = nprev
-        self.nnext = nnext
-        self.color = (1./(n**2),1./(n**2),1./np.sqrt(n))
-        self._artist = Rectangle((-1,yf),2,y0-yf,fill=True,facecolor=self.color)
-        self.y0 = y0
-        self.yf = yf
-
-    def set_master(self,master):
-        self.master = master
-        self.master.axes.add_artist(self._artist)
-
-    def remove(self):
-        self._artist.remove()
-
-
-def buildLayers(ns):
-    ys = np.linspace(0,-0.96,1+len(ns))
-    layers = [Layer(1,1,0,1,ns[0])]
-    for i,n in enumerate(ns):
-        prev_n = 1 if i == 0 else ns[i-1]
-        next_n = 1 if i == len(ns)-1 else ns[i+1]
-        layers.append(Layer(n,ys[i],ys[i+1],prev_n,next_n))
-
-    layers.append(Layer(1,-.96,-1,ns[-1],1))
-
-    return layers
 
 class MyMplCanvas(FigureCanvas):
     """Ultimately, this is a QWidget (as well as a FigureCanvasAgg, etc.)."""
@@ -227,6 +57,7 @@ class MyMplCanvas(FigureCanvas):
 class MyDynamicMplCanvas(MyMplCanvas):
     """A canvas that updates itself every second with a new plot."""
 
+    COLORS = ['red','orange','yellow','green','blue','purple']
     def __init__(self, *args, **kwargs):
         MyMplCanvas.__init__(self, *args, **kwargs)
         timer = QtCore.QTimer(self)
@@ -238,18 +69,29 @@ class MyDynamicMplCanvas(MyMplCanvas):
         self._cleanup = 20 #only check for cleanup every 1/n frames
         self._frame = 0
         self.isclicked = False
+        self.n0 = 1
+        self.last_x = 1
+        self.isrotating = False
+        self.framesrotating = 0
+        self.mode='circle'
+
 
 
         def onclick(event):
-            self.isclicked = True
-            if event.xdata is not None:
-                self.move_source(event.xdata)
+            if self.mode=='circle':
+                self.circlemove(event)
+            elif self.mode=='free':
+                self.freemove(event)
 
         def onmove(event):
-            if self.isclicked and event.xdata is not None:
-                self.move_source(event.xdata)
+            if self.mode=='circle':
+                self.circledrag(event)
+            elif self.mode=='free':
+                self.freedrag(event)
+
         def onmouseup(event):
             self.isclicked = False
+            self.isrotating = False
 
         self.axes.xaxis.set_ticks([])
         self.axes.yaxis.set_ticks([])
@@ -257,6 +99,44 @@ class MyDynamicMplCanvas(MyMplCanvas):
         self.mpl_connect('button_release_event',onmouseup)
         self.mpl_connect('motion_notify_event',onmove)
 
+
+    def freemove(self,event):
+        self.framesrotating = 0
+        if event.button == 1:
+            self.isrotating = -1
+            self.isclicked = True
+        else:
+            self.isrotating = 1
+
+    def circlemove(self,event):
+        if event.button == 1:
+            self.isclicked = True
+            if event.xdata is not None:
+                self.move_source(event.xdata,event.ydata)
+
+    def freedrag(self,event):
+        self.isrotating = False
+        if event.button == 1:
+            if self.isclicked and event.xdata is not None:
+                self.free_move_source(event.xdata,event.ydata)
+                self.last_x = event.xdata
+
+    def circledrag(self,event):
+        self.isrotating = False
+        if event.button == 1:
+            if self.isclicked and event.xdata is not None:
+                self.move_source(event.xdata,event.ydata)
+                self.last_x = event.xdata
+            elif self.isclicked:
+                self.move_source(np.sign(self.last_x),0)
+
+
+    def setCircleMode(self):
+        self.mode = 'circle'
+        self.move_source(self._source_x,self._source_y)
+
+    def setFreeMode(self):
+        self.mode = 'free'
 
     def set_reflection_counts(self,reflection_counts):
         self.reflection_counts = reflection_counts
@@ -278,20 +158,15 @@ class MyDynamicMplCanvas(MyMplCanvas):
         self.move_source(np.cos(np.pi/4))
         #source lies along an arc from (-1,0) to (0,1) to (1,0)
 
-    def move_source(self,x):
-        #edge case behaviour is not strictly correct, disable it
-        if x > .999:
-            x = 0.999
-        if x < -.999:
-            x = -.999
+    def set_source_angle(self,x,y,theta,is_circular=False):
         if(self._source_box):
             self._source_box.remove()
+        sin_t = np.sin(theta)
 
-        theta = np.arccos(x)
-        self.theta = theta
-        y = np.sin(theta)
-        sin_t = y
-        cos_t = x
+        #what a clusterfuck
+        if y < 0 and is_circular:
+            sin_t = -sin_t
+        cos_t = np.cos(theta)
         self._source_x = x
         self._source_y = y
         xprime1 = x+self.source_dx*cos_t
@@ -318,6 +193,34 @@ class MyDynamicMplCanvas(MyMplCanvas):
                 facecolor=(.5,.5,.5))
         self.axes.add_artist(self._source_box)
         self.master.update_angle(int(np.rad2deg(np.pi/2 - self.theta)))
+
+
+    def free_move_source(self,x,y):
+        self.set_source_angle(x,y,self.theta)
+
+    def rotate_source(self,theta):
+        self.theta=theta
+
+        self.set_source_angle(self._source_x,self._source_y,self.theta)
+
+    def move_source(self,x,event_y=1):
+        #edge case behaviour is not strictly correct, disable it
+        if x > 1:
+            x = 1
+        if x < -1:
+            x = -1
+
+        theta = np.arccos(x)
+        self.theta = theta
+        y = np.sin(theta)
+        if event_y < 0:
+            self.theta = -self.theta
+            y = -y
+            for layer in self.layers:
+                if layer.contains(y):
+                    self.n0 = layer.n
+                    break
+        self.set_source_angle(x,y,theta,True)
         #self.draw()
 
 
@@ -343,6 +246,12 @@ class MyDynamicMplCanvas(MyMplCanvas):
             self.moving_artists[key].update()
         if self._frame%self._cleanup == 0:
             self._remove_particles()
+
+        if self.isrotating:
+            self.framesrotating += 1
+            speed = (self.framesrotating*np.pi/360 if self.framesrotating < 24 
+                    else np.pi/15)
+            self.rotate_source((self.theta+self.isrotating*speed)%(2*np.pi))
         self.draw()
 
 
@@ -360,12 +269,13 @@ class MyDynamicMplCanvas(MyMplCanvas):
         self._to_delete = set()
 
     def add_particle(self,x=0,y=0,theta=0,v=0):
+        color = self.COLORS[np.random.randint(0,len(self.COLORS))]
         self.moving_artists[self._ids] = (Particle(self,self._ids,x,y,theta,v,
-            polarization=self._ids%2))
+            polarization=self._ids%2, color=color))
         self._ids += 1
 
     def add_particle_at_source(self,v=0):
-        self.add_particle(self._source_x,self._source_y,self.theta,-v)
+        self.add_particle(self._source_x,self._source_y,self.theta,-v/self.n0)
 
 
 class ApplicationWindow(QtWidgets.QMainWindow):
@@ -419,7 +329,12 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         layers = buildLayers([1.33])
         self.dc.setLayers(layers)
 
+        self.setup_menu(l)
+        self.dc.add_source()
+        self.add_layer()
 
+
+    def setup_menu(self,l):
         menu_l = QtWidgets.QVBoxLayout()
 
         self.angle_label = QtWidgets.QLabel(self.main_widget,
@@ -452,13 +367,36 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         menu_l.addLayout(label_l)
         self.layer_list = QtWidgets.QListWidget(self.main_widget)
         menu_l.addWidget(self.layer_list)
+
+
+        radioBox = QtWidgets.QVBoxLayout()
+        radioBox.addWidget(QtWidgets.QLabel("Click and Drag:"))
+        circlebtn = QtWidgets.QRadioButton("Snap to Circle")
+        circlebtn.setChecked(True)
+        circlebtn.toggled.connect(lambda:self.movementRadios(circlebtn))
+        freebtn = QtWidgets.QRadioButton("Free Movement")
+        freebtn.toggled.connect(lambda:self.movementRadios(freebtn))
+        radioBox.addWidget(circlebtn)
+        radioBox.addWidget(freebtn)
+        radioBox.addWidget(QtWidgets.QLabel("Auto Move:"))
+        orbitbtn = QtWidgets.QRadioButton("Orbit Perimeter")
+        orbitbtn.toggled.connect(lambda:self.movementRadios(orbitbtn))
+        spinbtn = QtWidgets.QRadioButton("Spin in Place")
+        spinbtn.toggled.connect(lambda:self.movementRadios(spinbtn))
+        radioBox.addWidget(orbitbtn)
+        radioBox.addWidget(spinbtn)
+
+        menu_l.addLayout(radioBox)
         menu_l.addStretch(1)
         l.addLayout(menu_l)
-
-        self.dc.add_source()
-        self.add_layer()
-
-
+    
+    def movementRadios(self,btn):
+        if btn.isChecked():
+            text = btn.text()
+            if text == "Free Movement":
+                self.dc.setFreeMode()
+            elif text == "Snap to Circle":
+                self.dc.setCircleMode()
 
     def add_layer(self):
         item = QtWidgets.QListWidgetItem("1.33",parent=self.layer_list)
