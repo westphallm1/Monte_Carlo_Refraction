@@ -1,8 +1,52 @@
 import numpy as np
 from matplotlib.patches import  Rectangle
+
+def wavelength_to_rgb(wavelength, gamma=0.8):
+    '''This converts a given wavelength of light to an 
+    approximate RGB color value. The wavelength must be given
+    in nanometers in the range from 380 nm through 750 nm
+    (789 THz through 400 THz).
+
+    Based on code by Dan Bruton
+    http://www.physics.sfasu.edu/astro/color/spectra.html
+    '''
+
+    wavelength = float(wavelength)
+    if wavelength >= 380 and wavelength <= 440:
+        attenuation = 0.3 + 0.7 * (wavelength - 380) / (440 - 380)
+        R = ((-(wavelength - 440) / (440 - 380)) * attenuation) ** gamma
+        G = 0.0
+        B = (1.0 * attenuation) ** gamma
+    elif wavelength >= 440 and wavelength <= 490:
+        R = 0.0
+        G = ((wavelength - 440) / (490 - 440)) ** gamma
+        B = 1.0
+    elif wavelength >= 490 and wavelength <= 510:
+        R = 0.0
+        G = 1.0
+        B = (-(wavelength - 510) / (510 - 490)) ** gamma
+    elif wavelength >= 510 and wavelength <= 580:
+        R = ((wavelength - 510) / (580 - 510)) ** gamma
+        G = 1.0
+        B = 0.0
+    elif wavelength >= 580 and wavelength <= 645:
+        R = 1.0
+        G = (-(wavelength - 645) / (645 - 580)) ** gamma
+        B = 0.0
+    elif wavelength >= 645 and wavelength <= 750:
+        attenuation = 0.3 + 0.7 * (750 - wavelength) / (750 - 645)
+        R = (1.0 * attenuation) ** gamma
+        G = 0.0
+        B = 0.0
+    else:
+        R = 0.0
+        G = 0.0
+        B = 0.0
+    return R,G,B
+
 class Particle(object):
     def __init__(self,master,id_,x=0,y=0,theta=0,v=0,polarization = 1,
-            color='red'):
+            wavelength=700.):
         self._id = id_
         self.master = master
         self.x = x
@@ -13,6 +57,8 @@ class Particle(object):
         self.vy = np.sin(theta)*v
         self.bounces = 0
         self.polarization = polarization
+        self.wavelength = wavelength
+        color = wavelength_to_rgb(self.wavelength)
 
         self._artist, = self.master.axes.plot(self.x,self.y,'o',color=color)
         self._gone = False
@@ -25,9 +71,9 @@ class Particle(object):
 
     def moveToNewLayer(self,layer,up=True):
         if up:
-            new_sin = layer.nprev*(np.sin(np.pi/2-self.theta))/layer.n
+            new_sin = self.nprev*(np.sin(np.pi/2-self.theta))/self.n
         else:
-            new_sin = layer.nnext*(np.sin(np.pi/2-self.theta))/layer.n
+            new_sin = self.nnext*(np.sin(np.pi/2-self.theta))/self.n
         if (-1 < new_sin) and (new_sin < 1):
             #move right to the boundry so we don't double count it
             if up:
@@ -40,9 +86,9 @@ class Particle(object):
             self.x += self.vx*pct_move
             self.theta = np.pi/2-np.arcsin(new_sin)
             if up:
-                self.v = self.v * layer.nprev/layer.n
+                self.v = self.v * self.nprev/self.n
             else:
-                self.v = self.v * layer.nnext/layer.n
+                self.v = self.v * self.nnext/self.n
                 self.theta *=-1
             self.vx = np.cos(self.theta)*self.v
             self.vy = np.sin(self.theta)*self.v
@@ -53,11 +99,11 @@ class Particle(object):
     def getThetaIThetaF(self,layer,up=True):
         theta_i = np.pi/2 - self.theta
         if up:
-            new_sin = layer.nprev*(np.sin(theta_i))/layer.n
-            m = layer.n/layer.nprev
+            new_sin = self.nprev*(np.sin(theta_i))/self.n
+            m = self.n/self.nprev
         else:
-            new_sin = layer.nnext*(np.sin(theta_i))/layer.n
-            m = layer.n/layer.nnext
+            new_sin = self.nnext*(np.sin(theta_i))/self.n
+            m = self.n/self.nnext
         if np.abs(new_sin) > 1:
             theta_f = np.nan
         else:
@@ -115,12 +161,16 @@ class Particle(object):
     def checkForChangeLayers(self):
         for layer in self.master.layers:
             if self.enteringFromAbove(layer):
+                self.n,self.nprev,self.nnext = \
+                        layer.ns_for_lambda(self.wavelength)            
                 if self.monteCarloRefract(layer):
                    pass 
                 else:
                     self.moveToNewLayer(layer)
                 break
             elif self.enteringFromBelow(layer):
+                self.n,self.nprev,self.nnext = \
+                        layer.ns_for_lambda(self.wavelength)            
                 if self.monteCarloRefract(layer,up=False):
                    pass 
                 else:
@@ -156,7 +206,7 @@ class Particle(object):
 
 
 class Layer(object):
-    def __init__(self,n,y0,yf,nprev = 1,nnext = 1):
+    def __init__(self,n,y0,yf,nprev = 1,nnext = 1,dndlambda=1e-3):
         self.n = n
         self.nprev = nprev
         self.nnext = nnext
@@ -164,6 +214,9 @@ class Layer(object):
         self._artist = Rectangle((-1,yf),2,y0-yf,fill=True,facecolor=self.color)
         self.y0 = y0
         self.yf = yf
+        #per nm
+        self.dndlambda = dndlambda
+
 
     def set_master(self,master):
         self.master = master
@@ -171,6 +224,13 @@ class Layer(object):
 
     def contains(self,y):
         return y >= self.yf and y < self.y0
+
+    def ns_for_lambda(self,lambda_):
+        n = max(1, self.n - (680-lambda_)*.001)
+        nprev = max(1, self.nprev - (680-lambda_)*self.dndlambda)
+        nnext = max(1, self.nnext - (680-lambda_)*self.dndlambda)
+        return n,nprev,nnext
+
     def remove(self):
         self._artist.remove()
 

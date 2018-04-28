@@ -23,6 +23,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.patches import Polygon, Rectangle
 from artists import Layer, buildLayers, Particle
+from menu_items import RefractionMenuWidget
 
 progname = os.path.basename(sys.argv[0])
 progversion = "0.1"
@@ -74,6 +75,7 @@ class MyDynamicMplCanvas(MyMplCanvas):
         self.isrotating = False
         self.framesrotating = 0
         self.mode='circle'
+        self.colormode='monochrome'
 
 
 
@@ -197,6 +199,10 @@ class MyDynamicMplCanvas(MyMplCanvas):
 
     def free_move_source(self,x,y):
         self.set_source_angle(x,y,self.theta)
+        for layer in self.layers:
+            if layer.contains(y):
+                self.n0 = layer.n
+                break
 
     def rotate_source(self,theta):
         self.theta=theta
@@ -269,9 +275,13 @@ class MyDynamicMplCanvas(MyMplCanvas):
         self._to_delete = set()
 
     def add_particle(self,x=0,y=0,theta=0,v=0):
-        color = self.COLORS[np.random.randint(0,len(self.COLORS))]
+        #wavelength = 400 + (10*self._ids)%300
+        if self.colormode == 'broadband':
+            wavelength = np.random.randint(400,680)
+        else:
+            wavelength = 670
         self.moving_artists[self._ids] = (Particle(self,self._ids,x,y,theta,v,
-            polarization=self._ids%2, color=color))
+            polarization=self._ids%2, wavelength=wavelength))
         self._ids += 1
 
     def add_particle_at_source(self,v=0):
@@ -296,6 +306,7 @@ class ApplicationWindow(QtWidgets.QMainWindow):
                 "3":0,
                 "4+":0
         }
+        self.automove = None
         self.help_menu = QtWidgets.QMenu('&Help', self)
         self.menuBar().addSeparator()
         self.menuBar().addMenu(self.help_menu)
@@ -311,7 +322,7 @@ class ApplicationWindow(QtWidgets.QMainWindow):
 
         timer = QtCore.QTimer(self)
         timer.timeout.connect(self.create_particle)
-        timer.start(16)
+        timer.start(32)
 
         timer2 = QtCore.QTimer(self)
         timer2.timeout.connect(self.update_counts)
@@ -331,93 +342,39 @@ class ApplicationWindow(QtWidgets.QMainWindow):
 
         self.setup_menu(l)
         self.dc.add_source()
-        self.add_layer()
+        self.menu_widget.add_layer()
 
 
     def setup_menu(self,l):
-        menu_l = QtWidgets.QVBoxLayout()
+        self.menu_widget = RefractionMenuWidget(
+                reflection_counts=self.reflection_counts)
+        self.menu_widget.connectButton('free',self.movementRadios)
+        self.menu_widget.connectButton('circle',self.movementRadios)
+        self.menu_widget.connectButton('spin',self.movementRadios)
+        self.menu_widget.connectButton('orbit',self.movementRadios)
+        self.menu_widget.connectButton('mono',self.set_colormode)
+        self.menu_widget.connectButton('broad',self.set_colormode)
 
-        self.angle_label = QtWidgets.QLabel(self.main_widget,
-                text="Initial Angle: ")
-        menu_l.addWidget(self.angle_label)
-
-        menu_l.addWidget(QtWidgets.QLabel(self.main_widget,
-            text="Reflection Counts:"))
-
-        self.count_labels = {}
-        for key in self.reflection_counts:
-            self.count_labels[key] = QtWidgets.QLabel(self.main_widget,
-                    text=key+": 0")
-            menu_l.addWidget(self.count_labels[key])
-
-
-        label_l = QtWidgets.QHBoxLayout()
-        label_l.addWidget(QtWidgets.QLabel(self.main_widget,
-            text="N = "))
-        label_l.addStretch(1)
-        plusbutton = QtWidgets.QToolButton(text="+")
-        plusbutton.clicked.connect(self.add_layer)
-        minusbutton = QtWidgets.QToolButton(text="-")
-        minusbutton.clicked.connect(self.remove_layer)
-        updatebutton = QtWidgets.QToolButton(text="Update")
-        updatebutton.clicked.connect(self.update_layers)
-        label_l.addWidget(plusbutton)
-        label_l.addWidget(minusbutton)
-        label_l.addWidget(updatebutton)
-        menu_l.addLayout(label_l)
-        self.layer_list = QtWidgets.QListWidget(self.main_widget)
-        menu_l.addWidget(self.layer_list)
-
-
-        radioBox = QtWidgets.QVBoxLayout()
-        radioBox.addWidget(QtWidgets.QLabel("Click and Drag:"))
-        circlebtn = QtWidgets.QRadioButton("Snap to Circle")
-        circlebtn.setChecked(True)
-        circlebtn.toggled.connect(lambda:self.movementRadios(circlebtn))
-        freebtn = QtWidgets.QRadioButton("Free Movement")
-        freebtn.toggled.connect(lambda:self.movementRadios(freebtn))
-        radioBox.addWidget(circlebtn)
-        radioBox.addWidget(freebtn)
-        radioBox.addWidget(QtWidgets.QLabel("Auto Move:"))
-        orbitbtn = QtWidgets.QRadioButton("Orbit Perimeter")
-        orbitbtn.toggled.connect(lambda:self.movementRadios(orbitbtn))
-        spinbtn = QtWidgets.QRadioButton("Spin in Place")
-        spinbtn.toggled.connect(lambda:self.movementRadios(spinbtn))
-        radioBox.addWidget(orbitbtn)
-        radioBox.addWidget(spinbtn)
-
-        menu_l.addLayout(radioBox)
-        menu_l.addStretch(1)
-        l.addLayout(menu_l)
+        self.menu_widget.connectButton('update',self.update_layers)
+        l.addWidget(self.menu_widget)
     
     def movementRadios(self,btn):
         if btn.isChecked():
             text = btn.text()
             if text == "Free Movement":
+                self.automove = None
                 self.dc.setFreeMode()
             elif text == "Snap to Circle":
+                self.automove = None
                 self.dc.setCircleMode()
+            elif text == "Circle Perimeter":
+                self.automove = 'circle'
+            elif text == "Spin in Place":
+                self.automove = 'spin'
 
-    def add_layer(self):
-        item = QtWidgets.QListWidgetItem("1.33",parent=self.layer_list)
-        item.setFlags(QtCore.Qt.ItemIsEditable|QtCore.Qt.ItemIsSelectable|
-                QtCore.Qt.ItemIsEnabled)
-        self.layer_list.addItem(item)
-
-    def remove_layer(self):
-        to_remove = self.layer_list.selectedItems()
-        if len(to_remove) == 0 and self.layer_list.count() > 0:
-            to_remove.append(self.layer_list.item(
-                self.layer_list.count()-1))
-        for item in to_remove:
-            idx = self.layer_list.indexFromItem(item)
-            self.layer_list.takeItem(idx.row())
 
     def update_layers(self):
-        layers = []
-        for i in range(self.layer_list.count()):
-            item = self.layer_list.item(i)
-            layers.append(float(item.text()))
+        layers = self.menu_widget.get_layer_idxs()
         self.dc.reset()
         layers = buildLayers(layers)
         self.dc.setLayers(layers)
@@ -427,8 +384,17 @@ class ApplicationWindow(QtWidgets.QMainWindow):
 
         self.dc.draw()
 
+    def set_colormode(self,btn):
+        if btn.isChecked():
+            text = btn.text()
+            if text == "Monochromatic":
+                self.dc.colormode = 'monochrome'
+            elif text == "Broadband":
+                self.dc.colormode = 'broadband'
+
     def update_angle(self,angle):
-        self.angle_label.setText("Initial Angle: {}°".format(int(angle)))
+        self.menu_widget.setAngleLabelText(
+                "Initial Angle: {}°".format(int(angle)))
 
     def update_counts(self):
         sum_ = 0.
@@ -439,11 +405,16 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         for key in self.reflection_counts:
             count = self.reflection_counts[key]
             pct = "%.2f"%(100.*count/sum_)
-            self.count_labels[key].setText(
-                    "{}: {} ({}%)".format(key,count,pct))
+            self.menu_widget.setCountLabel(key,count,pct)
 
     def create_particle(self):
         self.dc.add_particle_at_source(0.04)
+        if self.automove == 'spin':
+            self.dc.rotate_source(self.dc.theta + np.pi/90)
+        elif self.automove == 'circle':
+            sin_t = np.sin(np.pi/2-self.dc.theta-np.pi/90)
+            cos_t = np.cos(np.pi/2-self.dc.theta-np.pi/90)
+            self.dc.move_source(sin_t,cos_t)
 
     def fileQuit(self):
         self.close()
