@@ -1,11 +1,12 @@
 import numpy as np
 from matplotlib.patches import  Rectangle
-
+LAMBDA0 = 400
+LAMBDAf = 680
 def wavelength_to_rgb(wavelength, gamma=0.8):
     '''This converts a given wavelength of light to an 
     approximate RGB color value. The wavelength must be given
     in nanometers in the range from 380 nm through 750 nm
-    (789 THz through 400 THz).
+    (789 THz through LAMBDA0 THz).
 
     Based on code by Dan Bruton
     http://www.physics.sfasu.edu/astro/color/spectra.html
@@ -226,24 +227,27 @@ class Layer(object):
         return y >= self.yf and y < self.y0
 
     def ns_for_lambda(self,lambda_):
-        n = max(1, self.n - (680-lambda_)*.001)
-        nprev = max(1, self.nprev - (680-lambda_)*self.dndlambda)
-        nnext = max(1, self.nnext - (680-lambda_)*self.dndlambda)
+        def new_n(n):
+            return max(1,n+(lambda_-LAMBDA0)*self.dndlambda)
+
+        n = 1 if self.n == 1 else new_n(self.n)
+        nprev = 1 if self.nprev == 1 else new_n(self.nprev) 
+        nnext = 1 if self.nnext == 1 else new_n(self.nnext)
         return n,nprev,nnext
 
     def remove(self):
         self._artist.remove()
 
 
-def buildLayers(ns):
+def buildLayers(ns,dndlambda=0.001):
     ys = np.linspace(0,-0.96,1+len(ns))
-    layers = [Layer(1,1,0,1,ns[0])]
+    layers = [Layer(1,1,0,1,ns[0],dndlambda)]
     for i,n in enumerate(ns):
         prev_n = 1 if i == 0 else ns[i-1]
         next_n = 1 if i == len(ns)-1 else ns[i+1]
-        layers.append(Layer(n,ys[i],ys[i+1],prev_n,next_n))
+        layers.append(Layer(n,ys[i],ys[i+1],prev_n,next_n,dndlambda))
 
-    layers.append(Layer(1,-.96,-1,ns[-1],1))
+    layers.append(Layer(1,-.96,-1,ns[-1],1,dndlambda))
 
     return layers
 

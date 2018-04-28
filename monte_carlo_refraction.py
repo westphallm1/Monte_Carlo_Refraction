@@ -22,7 +22,7 @@ from numpy import arange, sin, pi
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.patches import Polygon, Rectangle
-from artists import Layer, buildLayers, Particle
+from artists import Layer, buildLayers, Particle,LAMBDA0,LAMBDAf
 from menu_items import RefractionMenuWidget
 
 progname = os.path.basename(sys.argv[0])
@@ -275,9 +275,8 @@ class MyDynamicMplCanvas(MyMplCanvas):
         self._to_delete = set()
 
     def add_particle(self,x=0,y=0,theta=0,v=0):
-        #wavelength = 400 + (10*self._ids)%300
         if self.colormode == 'broadband':
-            wavelength = np.random.randint(400,680)
+            wavelength = np.random.randint(LAMBDA0,LAMBDAf)
         else:
             wavelength = 670
         self.moving_artists[self._ids] = (Particle(self,self._ids,x,y,theta,v,
@@ -354,8 +353,7 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         self.menu_widget.connectButton('orbit',self.movementRadios)
         self.menu_widget.connectButton('mono',self.set_colormode)
         self.menu_widget.connectButton('broad',self.set_colormode)
-
-        self.menu_widget.connectButton('update',self.update_layers)
+        self.menu_widget.bindLayersUpdate(self.update_layers)
         l.addWidget(self.menu_widget)
     
     def movementRadios(self,btn):
@@ -373,12 +371,14 @@ class ApplicationWindow(QtWidgets.QMainWindow):
                 self.automove = 'spin'
 
 
-    def update_layers(self):
-        layers = self.menu_widget.get_layer_idxs()
+    def update_layers(self,event):
+        layers = event.refraction_indices
+        dndlambda = event.dndlambda
         self.dc.reset()
-        layers = buildLayers(layers)
+        layers = buildLayers(layers,dndlambda)
         self.dc.setLayers(layers)
-        self.dc.move_source(np.cos(self.dc.theta))
+        #keeps the source in place, just redraw it
+        self.dc.rotate_source(self.dc.theta)
         for key in self.reflection_counts:
             self.reflection_counts[key] = 0
 

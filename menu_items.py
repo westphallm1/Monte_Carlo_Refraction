@@ -75,7 +75,27 @@ class RefractionMenuWidget(QtWidgets.QWidget):
         radioBox.addWidget(orbitbtn)
         radioBox.addWidget(spinbtn)
         menu_l.addWidget(radioWidget)
-        
+        label3_l = QtWidgets.QHBoxLayout()
+        label3_l.addWidget(QtWidgets.QLabel(self,text="ω (°/sec) = "))
+        self.omega_edit = QtWidgets.QLineEdit(self)
+        self.omega_edit.setText("45")
+        label3_l.addWidget(self.omega_edit)
+        menu_l.addLayout(label3_l)
+
+        label4_l = QtWidgets.QHBoxLayout()
+        label4_l.addWidget(QtWidgets.QLabel(self,text="θ₁(°) = "))
+        self.theta0_edit= QtWidgets.QLineEdit(self)
+        self.theta0_edit.setText("0")
+        label4_l.addWidget(self.theta0_edit)
+        menu_l.addLayout(label4_l)
+
+        label5_l = QtWidgets.QHBoxLayout()
+        label5_l.addWidget(QtWidgets.QLabel(self,text="θ₂(°) = "))
+        self.theta1_edit= QtWidgets.QLineEdit(self)
+        self.theta1_edit.setText("360")
+        label5_l.addWidget(self.theta1_edit)
+        menu_l.addLayout(label5_l)
+
         menu_l.addWidget(self.HLine())
         
         #Light type config
@@ -100,18 +120,23 @@ class RefractionMenuWidget(QtWidgets.QWidget):
             'free':freebtn,
             'circle':circlebtn
         }
-        self.pushbtns = {
-            'plus':plusbutton,
-            'minus':minusbutton,
-            'update':updatebutton
-        }
+        self.updatebtn = updatebutton
 
     def connectButton(self,btnname,callback):
         if btnname in self.radiobtns:
             btn = self.radiobtns[btnname]
             btn.toggled.connect(lambda:callback(btn))
-        elif btnname in self.pushbtns:
-            self.pushbtns[btnname].clicked.connect(callback)
+
+    def bindLayersUpdate(self,callback):
+        class _Event: pass
+        def buildEvent():
+            e = _Event()
+            e.refraction_indices = self.get_layer_idxs()
+            e.dndlambda = float(self.dndlambda_edit.text())
+            return e
+
+        self.updatebtn.clicked.connect(lambda:callback(buildEvent()))
+        
     
     def setAngleLabelText(self,text):
         self.angle_label.setText(text)
