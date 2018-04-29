@@ -227,9 +227,12 @@ class Layer(object):
         return y >= self.yf and y < self.y0
 
     def ns_for_lambda(self,lambda_):
-        def new_n(n):
+        def new_n_pos(n):
             return max(1,n+(lambda_-LAMBDA0)*self.dndlambda)
-
+        def new_n_neg(n):
+            return max(1,n+(LAMBDAf-lambda_)*-self.dndlambda)
+        
+        new_n = new_n_pos if self.dndlambda > 0 else new_n_neg
         n = 1 if self.n == 1 else new_n(self.n)
         nprev = 1 if self.nprev == 1 else new_n(self.nprev) 
         nnext = 1 if self.nnext == 1 else new_n(self.nnext)

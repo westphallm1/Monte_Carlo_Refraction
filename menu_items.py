@@ -1,10 +1,10 @@
 from PyQt5 import QtCore, QtWidgets
-class RefractionMenuWidget(QtWidgets.QWidget):
+class RefractionMenuWidget(QtWidgets.QScrollArea):
     """A vertical set of menu items, with convenience functions to bind 
     callbacks to its subcomponents
     """
     def __init__(self,*args,reflection_counts={},**kwargs):
-        QtWidgets.QWidget.__init__(self,*args,**kwargs)
+        QtWidgets.QScrollArea.__init__(self,*args,**kwargs)
         self.reflection_counts = reflection_counts
         self.setup()
 
@@ -16,11 +16,14 @@ class RefractionMenuWidget(QtWidgets.QWidget):
         return toto
 
     def setup(self):
+        menu_widget = QtWidgets.QWidget()
         self.setSizePolicy(
                    QtWidgets.QSizePolicy.Minimum,
                    QtWidgets.QSizePolicy.Minimum)
         menu_l = QtWidgets.QVBoxLayout()
-        self.setLayout(menu_l)
+        menu_widget.setLayout(menu_l)
+        self.setWidget(menu_widget)
+        self.setWidgetResizable(True)
 
         self.angle_label = QtWidgets.QLabel(self, text="Initial Angle: ")
         menu_l.addWidget(self.angle_label)
@@ -51,7 +54,7 @@ class RefractionMenuWidget(QtWidgets.QWidget):
         menu_l.addWidget(self.layer_list)
 
         label2_l = QtWidgets.QHBoxLayout()
-        label2_l.addWidget(QtWidgets.QLabel(self, text="dN/dλ (1/nm) = "))
+        label2_l.addWidget(QtWidgets.QLabel(self, text="dN/dλ (nm⁻¹) = "))
         self.dndlambda_edit = QtWidgets.QLineEdit(self)
         self.dndlambda_edit.setText("0.001")
         label2_l.addWidget(self.dndlambda_edit)
