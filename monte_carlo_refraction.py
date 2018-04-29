@@ -18,13 +18,13 @@ import matplotlib
 matplotlib.use('Qt5Agg')
 from PyQt5 import QtCore, QtWidgets
 
-from numpy import arange, sin, pi
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.patches import Polygon, Rectangle
 from artists import Layer, buildLayers, Particle,LAMBDA0,LAMBDAf
 from menu_items import RefractionMenuWidget
 
+VACCUM_SPEED = 0.04
 progname = os.path.basename(sys.argv[0])
 progversion = "0.1"
 
@@ -39,7 +39,6 @@ class MyMplCanvas(FigureCanvas):
         self.axes = fig.add_subplot(111)
         self.axes.set_xlim(-1,1)
         self.axes.set_ylim(-1,1)
-        self.axes.set_title("Monte Carlo Refraction")
         
         self.compute_initial_figure()
 
@@ -49,6 +48,7 @@ class MyMplCanvas(FigureCanvas):
         FigureCanvas.setSizePolicy(self,
                                    QtWidgets.QSizePolicy.Expanding,
                                    QtWidgets.QSizePolicy.Expanding)
+        fig.tight_layout()
         FigureCanvas.updateGeometry(self)
 
     def compute_initial_figure(self):
@@ -76,22 +76,24 @@ class MyDynamicMplCanvas(MyMplCanvas):
         self.framesrotating = 0
         self.mode='circle'
         self.colormode='monochrome'
-
-
+        self.paused = False
 
         def onclick(event):
+            if self.paused: return
             if self.mode=='circle':
                 self.circlemove(event)
             elif self.mode=='free':
                 self.freemove(event)
 
         def onmove(event):
+            if self.paused: return
             if self.mode=='circle':
                 self.circledrag(event)
             elif self.mode=='free':
                 self.freedrag(event)
 
         def onmouseup(event):
+            if self.paused: return
             self.isclicked = False
             self.isrotating = False
 
@@ -101,6 +103,13 @@ class MyDynamicMplCanvas(MyMplCanvas):
         self.mpl_connect('button_release_event',onmouseup)
         self.mpl_connect('motion_notify_event',onmove)
 
+    def save(self,fname='fig.png'):
+        self.fig.savefig(fname)
+
+    def pause(self):
+        self.paused = True
+    def unpause(self):
+        self.paused = False
 
     def freemove(self,event):
         self.framesrotating = 0
@@ -161,6 +170,7 @@ class MyDynamicMplCanvas(MyMplCanvas):
         #source lies along an arc from (-1,0) to (0,1) to (1,0)
 
     def set_source_angle(self,x,y,theta,is_circular=False):
+        if self.paused: return
         if(self._source_box):
             self._source_box.remove()
         sin_t = np.sin(theta)
@@ -198,6 +208,7 @@ class MyDynamicMplCanvas(MyMplCanvas):
 
 
     def free_move_source(self,x,y):
+        if self.paused: return
         self.set_source_angle(x,y,self.theta)
         for layer in self.layers:
             if layer.contains(y):
@@ -206,7 +217,6 @@ class MyDynamicMplCanvas(MyMplCanvas):
 
     def rotate_source(self,theta):
         self.theta=theta
-
         self.set_source_angle(self._source_x,self._source_y,self.theta)
 
     def move_source(self,x,event_y=1):
@@ -246,6 +256,7 @@ class MyDynamicMplCanvas(MyMplCanvas):
         pass 
 
     def update_figure(self):
+        if self.paused: return
         # Build a list of 4 random integers between 0 and 10 (both inclusive)
         self._frame+=1
         for key in self.moving_artists:
@@ -271,7 +282,7 @@ class MyDynamicMplCanvas(MyMplCanvas):
                 key = str(len(self.reflection_counts)-1)+"+"
             else:
                 key = str(particle.bounces)
-                self.reflection_counts[key]+=1
+            self.reflection_counts[key]+=1
         self._to_delete = set()
 
     def add_particle(self,x=0,y=0,theta=0,v=0):
@@ -306,6 +317,10 @@ class ApplicationWindow(QtWidgets.QMainWindow):
                 "4+":0
         }
         self.automove = None
+        self.automove_step = np.deg2rad(45)/30
+        self.automove_bounds = (0,2*np.pi)
+        self.automove_sign = 1
+
         self.help_menu = QtWidgets.QMenu('&Help', self)
         self.menuBar().addSeparator()
         self.menuBar().addMenu(self.help_menu)
@@ -326,6 +341,14 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         timer2 = QtCore.QTimer(self)
         timer2.timeout.connect(self.update_counts)
         timer2.start(500)
+
+
+
+    def save_fig(self):
+        fname, _ = QtWidgets.QFileDialog.getSaveFileName(self,
+                "Save Figure","","PNG Image (*.png)")
+        if fname:
+            self.dc.save(fname)
 
 
     def setup_canvas(self):
@@ -353,9 +376,14 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         self.menu_widget.connectButton('orbit',self.movementRadios)
         self.menu_widget.connectButton('mono',self.set_colormode)
         self.menu_widget.connectButton('broad',self.set_colormode)
-        self.menu_widget.bindLayersUpdate(self.update_layers)
+        self.menu_widget.connectLayersUpdate(self.update_layers)
+        self.menu_widget.connectAutoMoveUpdate(self.update_automove)
+        self.menu_widget.connectPause(self.dc.pause)
+        self.menu_widget.connectUnpause(self.dc.unpause)
+        self.menu_widget.connectSave(self.save_fig)
         l.addWidget(self.menu_widget)
     
+
     def movementRadios(self,btn):
         if btn.isChecked():
             text = btn.text()
@@ -367,8 +395,12 @@ class ApplicationWindow(QtWidgets.QMainWindow):
                 self.dc.setCircleMode()
             elif text == "Circle Perimeter":
                 self.automove = 'circle'
+                sin_t = np.sin(self.automove_bounds[0])
+                cos_t = np.cos(self.automove_bounds[0])
+                self.dc.move_source(sin_t,cos_t)
             elif text == "Spin in Place":
                 self.automove = 'spin'
+                self.dc.rotate_source(self.automove_bounds[0])
 
 
     def update_layers(self,event):
@@ -384,6 +416,18 @@ class ApplicationWindow(QtWidgets.QMainWindow):
 
         self.dc.draw()
 
+    def update_automove(self,event):
+        twopi = 2*np.pi
+        self.automove_step = np.deg2rad(event.angular_velocity)/30
+        self.automove_bounds = ((np.pi/2-np.deg2rad(event.theta0))%twopi,
+                (np.pi/2-np.deg2rad(event.theta1))%twopi)
+        if self.automove == 'spin':
+            self.dc.rotate_source(self.automove_bounds[0])
+        elif self.automove == 'circle':
+            sin_t = np.sin(self.automove_bounds[1])
+            cos_t = np.cos(self.automove_bounds[1])
+            self.dc.move_source(cos_t,sin_t)
+
     def set_colormode(self,btn):
         if btn.isChecked():
             text = btn.text()
@@ -394,7 +438,7 @@ class ApplicationWindow(QtWidgets.QMainWindow):
 
     def update_angle(self,angle):
         self.menu_widget.setAngleLabelText(
-                "Initial Angle: {}°".format(int(angle)))
+                "Initial Angle: {}°".format(int(angle%360)))
 
     def update_counts(self):
         sum_ = 0.
@@ -407,14 +451,47 @@ class ApplicationWindow(QtWidgets.QMainWindow):
             pct = "%.2f"%(100.*count/sum_)
             self.menu_widget.setCountLabel(key,count,pct)
 
-    def create_particle(self):
-        self.dc.add_particle_at_source(0.04)
+    def spin_source_full_circle(self):
         if self.automove == 'spin':
-            self.dc.rotate_source(self.dc.theta + np.pi/90)
+            self.dc.rotate_source(self.dc.theta + self.automove_step)
         elif self.automove == 'circle':
-            sin_t = np.sin(np.pi/2-self.dc.theta-np.pi/90)
-            cos_t = np.cos(np.pi/2-self.dc.theta-np.pi/90)
+            sin_t = np.sin(np.pi/2-self.dc.theta- self.automove_step)
+            cos_t = np.cos(np.pi/2-self.dc.theta- self.automove_step)
             self.dc.move_source(sin_t,cos_t)
+
+    def spin_source_between_bounds(self):
+        twopi = 2*np.pi
+        theta1 = self.automove_bounds[0]
+        theta2 = self.automove_bounds[1]
+        if (theta1 > theta2):
+            if (self.dc.theta)%twopi > theta1:
+                self.automove_sign *=-1
+            elif (self.dc.theta)%twopi < theta2:
+                self.automove_sign *= -1
+        else:
+            if (self.dc.theta)%twopi < theta1:
+                self.automove_sign *=-1
+            elif (self.dc.theta)%twopi > theta2:
+                self.automove_sign *= -1
+
+
+        step = self.automove_sign*self.automove_step
+        if self.automove == 'spin':
+            self.dc.rotate_source(self.dc.theta + step)
+        elif self.automove == 'circle':
+            sin_t = np.sin(np.pi/2-self.dc.theta- step)
+            cos_t = np.cos(np.pi/2-self.dc.theta- step)
+            self.dc.move_source(sin_t,cos_t)
+        
+
+    def create_particle(self):
+        if self.dc.paused: return
+        twopi = 2*np.pi
+        self.dc.add_particle_at_source(VACCUM_SPEED)
+        if(self.automove_bounds[0]%twopi== self.automove_bounds[1]%twopi):
+            self.spin_source_full_circle()
+        else:
+            self.spin_source_between_bounds()
 
     def fileQuit(self):
         self.close()

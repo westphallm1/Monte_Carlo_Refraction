@@ -35,20 +35,31 @@ class RefractionMenuWidget(QtWidgets.QScrollArea):
             self.count_labels[key] = QtWidgets.QLabel(self, text=key+": 0")
             menu_l.addWidget(self.count_labels[key])
 
+
+        label7_l = QtWidgets.QHBoxLayout()
+        label7_l.addStretch(1)
+        self.pausebtn = QtWidgets.QToolButton(text="Pause")
+        self.unpausebtn = QtWidgets.QToolButton(text="Resume")
+        self.savebtn= QtWidgets.QToolButton(text="Save")
+        label7_l.addWidget(self.pausebtn)
+        label7_l.addWidget(self.unpausebtn)
+        label7_l.addWidget(self.savebtn)
+        menu_l.addLayout(label7_l)
+
         menu_l.addWidget(self.HLine())
 
         #Layer Index of Refraction Config
         label_l = QtWidgets.QHBoxLayout()
         label_l.addWidget(QtWidgets.QLabel(self, text="N = "))
         label_l.addStretch(1)
-        plusbutton = QtWidgets.QToolButton(text="+")
-        plusbutton.clicked.connect(self.add_layer)
-        minusbutton = QtWidgets.QToolButton(text="-")
-        minusbutton.clicked.connect(self.remove_layer)
-        updatebutton = QtWidgets.QToolButton(text="Update")
-        label_l.addWidget(plusbutton)
-        label_l.addWidget(minusbutton)
-        label_l.addWidget(updatebutton)
+        plusbtn = QtWidgets.QToolButton(text="+")
+        plusbtn.clicked.connect(self.add_layer)
+        minusbtn = QtWidgets.QToolButton(text="-")
+        minusbtn.clicked.connect(self.remove_layer)
+        updatebtn = QtWidgets.QToolButton(text="Update")
+        label_l.addWidget(plusbtn)
+        label_l.addWidget(minusbtn)
+        label_l.addWidget(updatebtn)
         menu_l.addLayout(label_l)
         self.layer_list = QtWidgets.QListWidget(self)
         menu_l.addWidget(self.layer_list)
@@ -72,32 +83,41 @@ class RefractionMenuWidget(QtWidgets.QScrollArea):
         freebtn = QtWidgets.QRadioButton("Free Movement")
         radioBox.addWidget(circlebtn)
         radioBox.addWidget(freebtn)
+
         radioBox.addWidget(QtWidgets.QLabel("Auto Move:"))
         orbitbtn = QtWidgets.QRadioButton("Circle Perimeter")
         spinbtn = QtWidgets.QRadioButton("Spin in Place")
         radioBox.addWidget(orbitbtn)
         radioBox.addWidget(spinbtn)
-        menu_l.addWidget(radioWidget)
+
+        label6_l = QtWidgets.QHBoxLayout()
+        label6_l.addWidget(QtWidgets.QLabel("Automove Settings:"))
+        radioBox.addLayout(label6_l)
+        self.update_auto_btn = QtWidgets.QToolButton(text="Update")
+        label6_l.addWidget(self.update_auto_btn)
+
         label3_l = QtWidgets.QHBoxLayout()
-        label3_l.addWidget(QtWidgets.QLabel(self,text="ω (°/sec) = "))
+        label3_l.addWidget(QtWidgets.QLabel(self,text="  ω (°/sec) = "))
         self.omega_edit = QtWidgets.QLineEdit(self)
         self.omega_edit.setText("45")
         label3_l.addWidget(self.omega_edit)
-        menu_l.addLayout(label3_l)
+        radioBox.addLayout(label3_l)
 
         label4_l = QtWidgets.QHBoxLayout()
-        label4_l.addWidget(QtWidgets.QLabel(self,text="θ₁(°) = "))
+        label4_l.addWidget(QtWidgets.QLabel(self,text="  θ₁(°) = "))
         self.theta0_edit= QtWidgets.QLineEdit(self)
         self.theta0_edit.setText("0")
         label4_l.addWidget(self.theta0_edit)
-        menu_l.addLayout(label4_l)
+        radioBox.addLayout(label4_l)
 
         label5_l = QtWidgets.QHBoxLayout()
-        label5_l.addWidget(QtWidgets.QLabel(self,text="θ₂(°) = "))
+        label5_l.addWidget(QtWidgets.QLabel(self,text="  θ₂(°) = "))
         self.theta1_edit= QtWidgets.QLineEdit(self)
         self.theta1_edit.setText("360")
         label5_l.addWidget(self.theta1_edit)
-        menu_l.addLayout(label5_l)
+        radioBox.addLayout(label5_l)
+
+        menu_l.addWidget(radioWidget)
 
         menu_l.addWidget(self.HLine())
         
@@ -123,14 +143,14 @@ class RefractionMenuWidget(QtWidgets.QScrollArea):
             'free':freebtn,
             'circle':circlebtn
         }
-        self.updatebtn = updatebutton
+        self.updatebtn = updatebtn
 
     def connectButton(self,btnname,callback):
         if btnname in self.radiobtns:
             btn = self.radiobtns[btnname]
             btn.toggled.connect(lambda:callback(btn))
 
-    def bindLayersUpdate(self,callback):
+    def connectLayersUpdate(self,callback):
         class _Event: pass
         def buildEvent():
             e = _Event()
@@ -139,7 +159,26 @@ class RefractionMenuWidget(QtWidgets.QScrollArea):
             return e
 
         self.updatebtn.clicked.connect(lambda:callback(buildEvent()))
-        
+
+    def connectAutoMoveUpdate(self,callback):
+        class _Event: pass
+        def buildEvent():
+            e = _Event()
+            e.angular_velocity = float(self.omega_edit.text())
+            e.theta0 = float(self.theta0_edit.text())
+            e.theta1 = float(self.theta1_edit.text())
+            return e
+
+        self.update_auto_btn.clicked.connect(lambda:callback(buildEvent()))
+
+    def connectSave(self,callback):
+        self.savebtn.clicked.connect(callback)
+
+    def connectPause(self,callback):
+        self.pausebtn.clicked.connect(callback)
+
+    def connectUnpause(self,callback):
+        self.unpausebtn.clicked.connect(callback)
     
     def setAngleLabelText(self,text):
         self.angle_label.setText(text)
